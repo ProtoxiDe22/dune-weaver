@@ -7,6 +7,7 @@ import threading
 import serial.tools.list_ports
 import math
 import json
+from mqtt_client import MQTTHandler
 
 app = Flask(__name__)
 
@@ -56,6 +57,7 @@ def connect_to_serial(port=None, baudrate=115200):
             ser = serial.Serial(port, baudrate)
             ser_port = port  # Store the connected port globally
         print(f"Connected to serial port: {port}")
+        mqtt_handler.update_state(serial=f"Connected to {port}")
         time.sleep(2)  # Allow time for the connection to establish
         return True  # Successfully connected
     except serial.SerialException as e:
@@ -63,6 +65,8 @@ def connect_to_serial(port=None, baudrate=115200):
         port = None  # Reset the port to try the next available one
 
     print("Max retries reached. Could not connect to a serial port.")
+    mqtt_handler.update_state(serial=f"Serial connection Failed")
+    
     return False
 
 def disconnect_serial():
@@ -143,7 +147,7 @@ def run_theta_rho_file(file_path):
     """Run a theta-rho file by sending data in optimized batches."""
     global stop_requested
     stop_requested = False
-
+    mqtt_handler.update_state(is_running=True)
     coordinates = parse_theta_rho_file(file_path)
     if len(coordinates) < 2:
         print("Not enough coordinates for interpolation.")
@@ -174,6 +178,7 @@ def run_theta_rho_file(file_path):
     # Reset theta after execution or stopping
     reset_theta()
     ser.write("FINISHED\n".encode())
+    mqtt_handler.update_state(is_running=False)
 
 def get_clear_pattern_file(pattern_name):
     """Return a .thr file path based on pattern_name."""
@@ -520,6 +525,9 @@ def save_playlists(playlists_dict):
     """
     with open(PLAYLISTS_FILE, "w") as f:
         json.dump(playlists_dict, f, indent=2)
+    
+    # call the update to signal HomeAssistant of the new playlists
+    get_playlists()
 
 @app.route("/list_all_playlists", methods=["GET"])
 def list_all_playlists():
@@ -750,7 +758,44 @@ def set_speed():
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 
+def create_mqtt_callbacks():
+    """Create a registry of callbacks that can be triggered via MQTT"""
+    return {
+        "run_pattern": run_theta_rho_file,
+        "stop_execution": lambda: setattr(__builtins__, 'stop_requested', True),
+        "home": lambda: send_command("HOME"),
+        "move_to_center": lambda: send_coordinate_batch(ser, [(0, 0)]),
+        "move_to_perimeter": lambda: send_coordinate_batch(ser, [(0, 1)]),
+        "set_speed": lambda speed: send_command(f"SET_SPEED {speed}"),
+        "run_playlist": lambda **kwargs: run_theta_rho_files(**kwargs)
+    }
+
+def get_playlists():
+    """
+    Load the entire playlists dictionary from the JSON file and triggers MQTT update of the playlists.
+    Returns something like: {
+        "My Playlist": ["file1.thr", "file2.thr"],
+        "Another": ["x.thr"]
+    }
+    """
+    with open(PLAYLISTS_FILE, "r") as f:
+        playlists_dict = json.load(f)
+    playlists = list(playlists_dict.keys())
+    mqtt_handler.update_state(playlists=playlists)
+    return playlists
+
 if __name__ == '__main__':
+    # Initialize and start MQTT handler
+    mqtt_handler = MQTTHandler(create_mqtt_callbacks())
+    mqtt_handler.start()
+    
     # Auto-connect to serial
     connect_to_serial()
+    
+
+    
+    # Initial playlist update
+    get_playlists()
+    
+    # Start Flask app
     app.run(debug=True, host='0.0.0.0', port=8080)
