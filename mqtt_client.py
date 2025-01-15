@@ -44,11 +44,15 @@ class MQTTHandler:
         self.playlist_select_topic = f"sand_table/playlist/set"
         self.serial_state_topic = f"sand_table/state/serial"
         
+        # Additional topics for pattern files
+        self.pattern_select_topic = f"sand_table/pattern/set"
+        
         # Store current state
         self.current_file = ""
         self.is_running = False
         self.serial_state = ""
         self.playlists = []
+        self.patterns = []
 
     def setup_ha_discovery(self):
         """Publish Home Assistant MQTT discovery configurations"""
@@ -103,12 +107,25 @@ class MQTTHandler:
         }
         self._publish_discovery("select", "playlist", playlist_config)
 
+        # Pattern Select
+        pattern_config = {
+            "name": f"{self.device_name} Pattern",
+            "unique_id": f"{self.device_id}_pattern",
+            "command_topic": self.pattern_select_topic,
+            "state_topic": f"{self.pattern_select_topic}/state",
+            "options": self.patterns,
+            "device": base_device,
+            "icon": "mdi:draw"
+        }
+        self._publish_discovery("select", "pattern", pattern_config)
+
     def _publish_discovery(self, component: str, config_type: str, config: dict):
         """Helper method to publish HA discovery configs"""
         discovery_topic = f"{self.discovery_prefix}/{component}/{self.device_id}/{config_type}/config"
         self.client.publish(discovery_topic, json.dumps(config), retain=True)
 
-    def update_state(self, is_running: bool = None, current_file: str = None, playlists: list = None, serial=None):
+    def update_state(self, is_running: bool = None, current_file: str = None, 
+                    playlists: list = None, patterns: list = None, serial=None):
         """Update the state of the sand table and publish to MQTT"""
         if is_running is not None:
             self.is_running = is_running
@@ -123,14 +140,23 @@ class MQTTHandler:
             # Republish discovery config with updated playlist options
             self.setup_ha_discovery()
         
+        if patterns is not None:
+            self.patterns = patterns
+            # Republish discovery config with updated pattern options
+            self.setup_ha_discovery()
+        
         if serial is not None:
             self.serial_state = serial
             self.client.publish(self.serial_state_topic, serial, retain=True)
 
     def on_connect(self, client, userdata, flags, rc):
         print(f"Connected to MQTT broker with result code {rc}")
-        # Subscribe to command topic and playlist selection
-        client.subscribe([(self.command_topic, 0), (self.playlist_select_topic, 0)])
+        # Subscribe to command topics and pattern selection
+        client.subscribe([
+            (self.command_topic, 0), 
+            (self.playlist_select_topic, 0),
+            (self.pattern_select_topic, 0)
+        ])
         # Publish discovery configurations
         self.setup_ha_discovery()
 
@@ -141,8 +167,15 @@ class MQTTHandler:
                 playlist_name = msg.payload.decode()
                 if playlist_name in self.playlists:
                     self.callback_registry['run_playlist'](playlist_name=playlist_name)
-                    # Publish state back to HA
                     self.client.publish(f"{self.playlist_select_topic}/state", playlist_name, retain=True)
+            
+            elif msg.topic == self.pattern_select_topic:
+                # Handle pattern selection
+                pattern_name = msg.payload.decode()
+                if pattern_name in self.patterns:
+                    self.callback_registry['run_pattern'](file_path=f"patterns/{pattern_name}")
+                    self.client.publish(f"{self.pattern_select_topic}/state", pattern_name, retain=True)
+            
             else:
                 # Handle other commands as before
                 payload = json.loads(msg.payload.decode())
@@ -169,6 +202,7 @@ class MQTTHandler:
                     "client_id": self.client_id,
                     "current_file": self.current_file
                 }
+                print( self.client_id, self.current_file, self.is_running)
                 # Publish status
                 self.client.publish(self.status_topic, json.dumps(status))
                 
@@ -179,11 +213,13 @@ class MQTTHandler:
                 time.sleep(5)  # Wait before retry
 
     def start(self):
+        print("aaaaaaaaaaaaaa")
         try:
+            
             # Connect to broker
             self.client.connect(self.broker, self.port)
             
-            # Start MQTT loop in a separate thread
+            # # Start MQTT loop in a separate thread
             self.client.loop_start()
             
             # Start status publishing thread
@@ -191,7 +227,6 @@ class MQTTHandler:
             self.status_thread = threading.Thread(target=self.publish_status)
             self.status_thread.daemon = True
             self.status_thread.start()
-            self.update_state(False, "", [], "")
             
             print("MQTT Handler started successfully")
         except Exception as e:

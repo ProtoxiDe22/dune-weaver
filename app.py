@@ -323,6 +323,10 @@ def list_theta_rho_files():
             # Construct the relative file path
             relative_path = os.path.relpath(os.path.join(root, file), THETA_RHO_DIR)
             files.append(relative_path)
+    
+    # Update MQTT with available patterns
+    mqtt_handler.update_state(patterns=sorted(files))
+    
     return jsonify(sorted(files))
 
 @app.route('/upload_theta_rho', methods=['POST'])
@@ -772,16 +776,23 @@ def create_mqtt_callbacks():
 
 def get_playlists():
     """
-    Load the entire playlists dictionary from the JSON file and triggers MQTT update of the playlists.
-    Returns something like: {
-        "My Playlist": ["file1.thr", "file2.thr"],
-        "Another": ["x.thr"]
-    }
+    Load the entire playlists dictionary from the JSON file and triggers MQTT update.
     """
     with open(PLAYLISTS_FILE, "r") as f:
         playlists_dict = json.load(f)
     playlists = list(playlists_dict.keys())
+    
+    # Update both playlists and patterns in MQTT
     mqtt_handler.update_state(playlists=playlists)
+    
+    # Also update the patterns list
+    files = []
+    for root, _, filenames in os.walk(THETA_RHO_DIR):
+        for file in filenames:
+            relative_path = os.path.relpath(os.path.join(root, file), THETA_RHO_DIR)
+            files.append(relative_path)
+    mqtt_handler.update_state(patterns=sorted(files))
+    
     return playlists
 
 if __name__ == '__main__':
@@ -792,9 +803,7 @@ if __name__ == '__main__':
     # Auto-connect to serial
     connect_to_serial()
     
-
-    
-    # Initial playlist update
+    # Initial playlist and pattern update
     get_playlists()
     
     # Start Flask app
