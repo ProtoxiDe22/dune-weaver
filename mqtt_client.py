@@ -41,7 +41,7 @@ class MQTTHandler:
         # Additional topics for state
         self.current_file_topic = f"sand_table/state/current_file"
         self.running_state_topic = f"sand_table/state/running"
-        self.playlist_select_topic = f"sand_table/playlist/set"
+        # self.playlist_select_topic = f"sand_table/playlist/set"
         self.serial_state_topic = f"sand_table/state/serial"
         
         # Additional topics for pattern files
@@ -51,7 +51,7 @@ class MQTTHandler:
         self.current_file = ""
         self.is_running = False
         self.serial_state = ""
-        self.playlists = []
+        # self.playlists = []
         self.patterns = []
 
     def setup_ha_discovery(self):
@@ -95,17 +95,17 @@ class MQTTHandler:
         }
         self._publish_discovery("sensor", "current_file", file_config)
 
-        # Playlist Select
-        playlist_config = {
-            "name": f"{self.device_name} Playlist",
-            "unique_id": f"{self.device_id}_playlist",
-            "command_topic": self.playlist_select_topic,
-            "state_topic": f"{self.playlist_select_topic}/state",
-            "options": self.playlists,
-            "device": base_device,
-            "icon": "mdi:playlist-play"
-        }
-        self._publish_discovery("select", "playlist", playlist_config)
+        # # Playlist Select
+        # playlist_config = {
+        #     "name": f"{self.device_name} Playlist",
+        #     "unique_id": f"{self.device_id}_playlist",
+        #     "command_topic": self.playlist_select_topic,
+        #     "state_topic": f"{self.playlist_select_topic}/state",
+        #     "options": self.playlists,
+        #     "device": base_device,
+        #     "icon": "mdi:playlist-play"
+        # }
+        # self._publish_discovery("select", "playlist", playlist_config)
 
         # Pattern Select
         pattern_config = {
@@ -135,10 +135,10 @@ class MQTTHandler:
             self.current_file = current_file
             self.client.publish(self.current_file_topic, current_file, retain=True)
         
-        if playlists is not None:
-            self.playlists = playlists
-            # Republish discovery config with updated playlist options
-            self.setup_ha_discovery()
+        # if playlists is not None:
+        #     self.playlists = playlists
+        #     # Republish discovery config with updated playlist options
+        #     self.setup_ha_discovery()
         
         if patterns is not None:
             self.patterns = patterns
@@ -154,7 +154,7 @@ class MQTTHandler:
         # Subscribe to command topics and pattern selection
         client.subscribe([
             (self.command_topic, 0), 
-            (self.playlist_select_topic, 0),
+            # (self.playlist_select_topic, 0),
             (self.pattern_select_topic, 0)
         ])
         # Publish discovery configurations
@@ -162,14 +162,14 @@ class MQTTHandler:
 
     def on_message(self, client, userdata, msg):
         try:
-            if msg.topic == self.playlist_select_topic:
-                # Handle playlist selection
-                playlist_name = msg.payload.decode()
-                if playlist_name in self.playlists:
-                    self.callback_registry['run_playlist'](playlist_name=playlist_name)
-                    self.client.publish(f"{self.playlist_select_topic}/state", playlist_name, retain=True)
+            # if msg.topic == self.playlist_select_topic:
+            #     # Handle playlist selection
+            #     playlist_name = msg.payload.decode()
+            #     if playlist_name in self.playlists:
+            #         self.callback_registry['run_playlist'](playlist_name=playlist_name)
+            #         self.client.publish(f"{self.playlist_select_topic}/state", playlist_name, retain=True)
             
-            elif msg.topic == self.pattern_select_topic:
+            if msg.topic == self.pattern_select_topic:
                 # Handle pattern selection
                 pattern_name = msg.payload.decode()
                 if pattern_name in self.patterns:
@@ -202,7 +202,6 @@ class MQTTHandler:
                     "client_id": self.client_id,
                     "current_file": self.current_file
                 }
-                print( self.client_id, self.current_file, self.is_running)
                 # Publish status
                 self.client.publish(self.status_topic, json.dumps(status))
                 
@@ -213,7 +212,6 @@ class MQTTHandler:
                 time.sleep(5)  # Wait before retry
 
     def start(self):
-        print("aaaaaaaaaaaaaa")
         try:
             
             # Connect to broker
