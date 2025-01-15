@@ -85,28 +85,6 @@ class MQTTHandler:
         }
         self._publish_discovery("binary_sensor", "running_state", running_config)
 
-        # Current File Sensor
-        file_config = {
-            "name": f"{self.device_name} Current Pattern",
-            "unique_id": f"{self.device_id}_current_file",
-            "state_topic": self.current_file_topic,
-            "device": base_device,
-            "icon": "mdi:file-document-outline"
-        }
-        self._publish_discovery("sensor", "current_file", file_config)
-
-        # # Playlist Select
-        # playlist_config = {
-        #     "name": f"{self.device_name} Playlist",
-        #     "unique_id": f"{self.device_id}_playlist",
-        #     "command_topic": self.playlist_select_topic,
-        #     "state_topic": f"{self.playlist_select_topic}/state",
-        #     "options": self.playlists,
-        #     "device": base_device,
-        #     "icon": "mdi:playlist-play"
-        # }
-        # self._publish_discovery("select", "playlist", playlist_config)
-
         # Pattern Select
         pattern_config = {
             "name": f"{self.device_name} Pattern",
@@ -133,12 +111,10 @@ class MQTTHandler:
         
         if current_file is not None:
             self.current_file = current_file
-            self.client.publish(self.current_file_topic, current_file, retain=True)
-        
-        # if playlists is not None:
-        #     self.playlists = playlists
-        #     # Republish discovery config with updated playlist options
-        #     self.setup_ha_discovery()
+            # Publish current file to the pattern select's state topic instead
+            if current_file:  # Only publish if there's actually a file
+                file_name = current_file.split("/")[-1].split("\\")[-1]
+                self.client.publish(f"{self.pattern_select_topic}/state", file_name, retain=True)
         
         if patterns is not None:
             self.patterns = patterns

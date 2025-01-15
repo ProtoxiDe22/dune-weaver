@@ -147,7 +147,7 @@ def run_theta_rho_file(file_path):
     """Run a theta-rho file by sending data in optimized batches."""
     global stop_requested
     stop_requested = False
-    mqtt_handler.update_state(is_running=True)
+    mqtt_handler.update_state(is_running=True, current_file=file_path)
     coordinates = parse_theta_rho_file(file_path)
     if len(coordinates) < 2:
         print("Not enough coordinates for interpolation.")
@@ -178,7 +178,7 @@ def run_theta_rho_file(file_path):
     # Reset theta after execution or stopping
     reset_theta()
     ser.write("FINISHED\n".encode())
-    mqtt_handler.update_state(is_running=False)
+    mqtt_handler.update_state(is_running=False, current_file="")
 
 def get_clear_pattern_file(pattern_name):
     """Return a .thr file path based on pattern_name."""
@@ -215,6 +215,7 @@ def run_theta_rho_files(
     while True:
         for idx, path in enumerate(file_paths):
             if stop_requested:
+                mqtt_handler.update_state(is_running=False, current_file="")
                 print("Execution stopped before starting next pattern.")
                 return
 
