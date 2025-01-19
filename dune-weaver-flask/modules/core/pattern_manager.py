@@ -157,6 +157,8 @@ def run_theta_rho_file(file_path, schedule_hours=None):
     """Run a single theta-rho file."""
     global stop_requested, current_playing_file, execution_progress
     stop_requested = False
+    if THETA_RHO_DIR not in file_path:
+        file_path = os.path.join(THETA_RHO_DIR, file_path)
     current_playing_file = file_path
     execution_progress = (0, 0)
     _update_mqtt_state()  # Update state when starting file

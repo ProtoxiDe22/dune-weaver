@@ -240,13 +240,12 @@ class MQTTHandler(BaseMQTTHandler):
     def on_message(self, client, userdata, msg):
         """Callback when message is received."""
         
-        logger.critical(msg)
         try:
             if msg.topic == self.pattern_select_topic:
                 # Handle pattern selection
                 pattern_name = msg.payload.decode()
                 if pattern_name in self.patterns:
-                    self.callback_registry['run_pattern'](file_path=f"patterns/{pattern_name}")
+                    self.callback_registry['run_pattern'](file_path=f"{pattern_name}")
                     self.client.publish(f"{self.pattern_select_topic}/state", pattern_name, retain=True)
             else:
                 # Handle other commands
