@@ -3,14 +3,22 @@ import os
 from typing import Dict, Callable
 from modules.core.pattern_manager import (
     run_theta_rho_file, stop_execution, pause_execution,
-    resume_execution, get_execution_status, THETA_RHO_DIR
+    resume_execution, get_execution_status, THETA_RHO_DIR,
+    run_theta_rho_files
 )
+from modules.core.playlist_manager import get_playlist
 from modules.serial.serial_manager import send_command, get_serial_status
 
 def create_mqtt_callbacks() -> Dict[str, Callable]:
     """Create and return the MQTT callback registry."""
     return {
         'run_pattern': lambda file_path: run_theta_rho_file(file_path),
+        'run_playlist': lambda playlist_name: run_theta_rho_files(
+            [os.path.join(THETA_RHO_DIR, file) for file in get_playlist(playlist_name)['files']],
+            run_mode='loop',  # Default to loop mode
+            pause_time=0,  # No pause between patterns
+            clear_pattern=None  # No clearing between patterns
+        ),
         'stop': stop_execution,
         'pause': pause_execution,
         'resume': resume_execution,

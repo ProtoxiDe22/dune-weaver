@@ -42,12 +42,14 @@ class MQTTHandler(BaseMQTTHandler):
         self.running_state_topic = f"{self.device_id}/state/running"
         self.serial_state_topic = f"{self.device_id}/state/serial"
         self.pattern_select_topic = f"{self.device_id}/pattern/set"
-        
+        self.playlist_select_topic = f"{self.device_id}/playlist/set"
+
         # Store current state
         self.current_file = ""
         self.is_running_state = False
         self.serial_state = ""
         self.patterns = []
+        self.playlists = []
 
         # Initialize MQTT client if broker is configured
         if self.broker:
@@ -104,64 +106,29 @@ class MQTTHandler(BaseMQTTHandler):
         }
         self._publish_discovery("select", "pattern", pattern_config)
 
-        # Pattern List Sensor
-        pattern_list_config = {
-            "name": f"{self.device_name} Available Patterns",
-            "unique_id": f"{self.device_id}_pattern_list",
-            "state_topic": f"{self.device_id}/state/patterns",
+        # Playlist Select
+        playlist_config = {
+            "name": f"{self.device_name} Playlist",
+            "unique_id": f"{self.device_id}_playlist",
+            "command_topic": self.playlist_select_topic,
+            "state_topic": f"{self.playlist_select_topic}/state",
+            "options": self.playlists,
             "device": base_device,
-            "icon": "mdi:file-multiple",
-            "entity_category": "diagnostic"
+            "icon": "mdi:playlist-play"
         }
-        self._publish_discovery("sensor", "pattern_list", pattern_list_config)
+        self._publish_discovery("select", "playlist", playlist_config)
 
         # Playlist Active Sensor
         playlist_active_config = {
             "name": f"{self.device_name} Playlist Active",
             "unique_id": f"{self.device_id}_playlist_active",
-            "state_topic": "{self.device_id}/state/playlist",
+            "state_topic": f"{self.device_id}/state/playlist",
             "value_template": "{{ value_json.active }}",
             "device": base_device,
             "icon": "mdi:playlist-play",
             "entity_category": "diagnostic"
         }
         self._publish_discovery("binary_sensor", "playlist_active", playlist_active_config)
-
-        # Current File Index Sensor
-        playlist_index_config = {
-            "name": f"{self.device_name} Playlist Index",
-            "unique_id": f"{self.device_id}_playlist_index",
-            "state_topic": "{self.device_id}/state/playlist",
-            "value_template": "{{ value_json.current_index }}",
-            "device": base_device,
-            "icon": "mdi:playlist-music",
-            "entity_category": "diagnostic"
-        }
-        self._publish_discovery("sensor", "playlist_index", playlist_index_config)
-
-        # Total Files Sensor
-        playlist_total_config = {
-            "name": f"{self.device_name} Playlist Total Files",
-            "unique_id": f"{self.device_id}_playlist_total",
-            "state_topic": "{self.device_id}/state/playlist",
-            "value_template": "{{ value_json.total_files }}",
-            "device": base_device,
-            "icon": "mdi:playlist-music",
-            "entity_category": "diagnostic"
-        }
-        self._publish_discovery("sensor", "playlist_total", playlist_total_config)
-
-        # Clearing Pattern Sensor
-        playlist_clearing_config = {
-            "name": f"{self.device_name} Clearing Pattern",
-            "unique_id": f"{self.device_id}_clearing_pattern",
-            "state_topic": f"{self.device_id}/state/playlist",
-            "value_template": "{{ value_json.is_clearing }}",
-            "device": base_device,
-            "icon": "mdi:eraser",
-            "entity_category": "diagnostic"
-        }
-        self._publish_discovery("binary_sensor", "clearing_pattern", playlist_clearing_config)
 
     def _publish_discovery(self, component: str, config_type: str, config: dict):
         """Helper method to publish HA discovery configs."""
@@ -196,35 +163,46 @@ class MQTTHandler(BaseMQTTHandler):
                 # Update both the current file topic and the pattern select state
                 self.client.publish(self.current_file_topic, file_name, retain=True)
                 self.client.publish(f"{self.pattern_select_topic}/state", file_name, retain=True)
-                logger.info(file_name)
-                logger.info(f"{self.pattern_select_topic}/state")
             else:
                 # Clear both states when no file is playing
                 self.client.publish(self.current_file_topic, "", retain=True)
                 self.client.publish(f"{self.pattern_select_topic}/state", "", retain=True)
-        
+
         if patterns is not None:
             # Only proceed if patterns have actually changed
             if set(patterns) != set(self.patterns):
                 self.patterns = patterns
-                # Publish the current list of patterns
-                self.client.publish(f"{self.device_id}/state/patterns", json.dumps(patterns), retain=True)
                 # Republish discovery config with updated pattern options
                 self.setup_ha_discovery()
         
         if serial is not None:
-            self.serial_state = serial
-            self.client.publish(self.serial_state_topic, serial, retain=True)
+            # Format serial state as "connected to <port>" or "disconnected"
+            if "connected" in serial.lower():
+                port = serial.split(" ")[-1]  # Extract port from status message
+                formatted_state = f"connected to {port}"
+            else:
+                formatted_state = "disconnected"
+            
+            self.serial_state = formatted_state
+            self.client.publish(self.serial_state_topic, formatted_state, retain=True)
         
         if playlist is not None:
-            # Publish playlist information
+            # Update playlist list if needed
+            if playlist.get('all_playlists'):
+                self.playlists = playlist['all_playlists']
+                self.setup_ha_discovery()  # Republish discovery to update playlist options
+            
+            # Publish playlist active state
             self.client.publish(f"{self.device_id}/state/playlist", json.dumps({
-                "active": bool(playlist),
-                "current_index": playlist.get("current_index", 0) if playlist else None,
-                "total_files": len(playlist["files"]) if playlist else 0,
-                "is_clearing": playlist.get("is_clearing", False) if playlist else False,
-                "files": playlist.get("files", []) if playlist else []
+                "active": bool(playlist.get('current_playlist')),
             }), retain=True)
+            
+            # Update playlist select state if a playlist is active
+            if playlist.get('current_playlist'):
+                current_playlist_name = playlist['current_playlist'][0]  # Use first file as playlist name
+                self.client.publish(f"{self.playlist_select_topic}/state", current_playlist_name, retain=True)
+            else:
+                self.client.publish(f"{self.playlist_select_topic}/state", "", retain=True)
 
     def on_connect(self, client, userdata, flags, rc):
         """Callback when connected to MQTT broker."""
@@ -232,7 +210,8 @@ class MQTTHandler(BaseMQTTHandler):
         # Subscribe to command topics and pattern selection
         client.subscribe([
             (self.command_topic, 0),
-            (self.pattern_select_topic, 0)
+            (self.pattern_select_topic, 0),
+            (self.playlist_select_topic, 0)
         ])
         # Publish discovery configurations
         self.setup_ha_discovery()
@@ -247,6 +226,12 @@ class MQTTHandler(BaseMQTTHandler):
                 if pattern_name in self.patterns:
                     self.callback_registry['run_pattern'](file_path=f"{pattern_name}")
                     self.client.publish(f"{self.pattern_select_topic}/state", pattern_name, retain=True)
+            elif msg.topic == self.playlist_select_topic:
+                # Handle playlist selection
+                playlist_name = msg.payload.decode()
+                if playlist_name in self.playlists:
+                    self.callback_registry['run_playlist'](playlist_name=playlist_name)
+                    self.client.publish(f"{self.playlist_select_topic}/state", playlist_name, retain=True)
             else:
                 # Handle other commands
                 payload = json.loads(msg.payload.decode())
@@ -289,7 +274,6 @@ class MQTTHandler(BaseMQTTHandler):
             return
         
         try:
-            
             self.client.connect(self.broker, self.port)
             self.client.loop_start()
             # Start status publishing thread
@@ -300,10 +284,12 @@ class MQTTHandler(BaseMQTTHandler):
             # Get initial states from modules
             from modules.core.pattern_manager import get_execution_status, get_pattern_files
             from modules.serial.serial_manager import get_serial_status
+            from modules.core.playlist_manager import list_all_playlists
             
             execution_status = get_execution_status()
             serial_status = get_serial_status()
             patterns = get_pattern_files()
+            playlists = list_all_playlists()
 
             # Wait a bit for MQTT connection to establish
             time.sleep(1)
@@ -319,31 +305,40 @@ class MQTTHandler(BaseMQTTHandler):
             self.client.publish(self.running_state_topic, 
                               "ON" if execution_status.get('is_running', False) else "OFF", 
                               retain=True)
-            self.client.publish(self.serial_state_topic, 
-                              serial_status.get('status', ''), 
-                              retain=True)
+            
+            # Format and publish serial state
+            serial_state = serial_status.get('status', '')
+            if "connected" in serial_state.lower():
+                port = serial_status.get('port', '')
+                formatted_state = f"connected to {port}"
+            else:
+                formatted_state = "disconnected"
+            self.client.publish(self.serial_state_topic, formatted_state, retain=True)
             
             # Update and publish pattern list
             self.patterns = patterns
-            self.client.publish(f"{self.device_id}/state/patterns", json.dumps(patterns), retain=True)
+            
+            # Update and publish playlist list
+            self.playlists = playlists
             
             # Get and publish playlist state
             playlist_info = None
             if execution_status.get('current_playlist'):
                 playlist_info = {
-                    'files': execution_status['current_playlist'],
-                    'current_index': execution_status.get('current_playing_index', 0),
-                    'is_clearing': execution_status.get('is_clearing', False)
+                    'current_playlist': execution_status['current_playlist']
                 }
             
             self.client.publish(f"{self.device_id}/state/playlist", json.dumps({
-                "active": bool(playlist_info),
-                "current_index": playlist_info['current_index'] if playlist_info else None,
-                "total_files": len(playlist_info['files']) if playlist_info else 0,
-                "is_clearing": playlist_info.get('is_clearing', False) if playlist_info else False,
-                "files": playlist_info.get('files', []) if playlist_info else []
+                "active": bool(playlist_info)
             }), retain=True)
-            
+
+            # Update playlist select state if a playlist is active
+            if playlist_info and playlist_info['current_playlist']:
+                current_playlist_name = playlist_info['current_playlist'][0]
+                self.client.publish(f"{self.playlist_select_topic}/state", current_playlist_name, retain=True)
+            else:
+                self.client.publish(f"{self.playlist_select_topic}/state", "", retain=True)
+
             self.setup_ha_discovery()
             
             logger.info("MQTT Handler started successfully")
