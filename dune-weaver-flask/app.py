@@ -32,12 +32,6 @@ mqtt_handler=None
 # Ensure the patterns directory exists
 os.makedirs(THETA_RHO_DIR, exist_ok=True)
 
-# Register cleanup on app shutdown
-@app.teardown_appcontext
-def cleanup(error):
-    if mqtt_handler:
-        mqtt_handler.stop()
-
 # API Routes
 @app.route('/')
 def index():
