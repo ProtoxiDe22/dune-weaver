@@ -17,6 +17,20 @@ arduino_driver_type = 'Unknown'
 firmware_version = 'Unknown'
 serial_lock = threading.Lock()
 
+# MQTT handler (will be set by the app)
+mqtt_handler = None
+
+def set_mqtt_handler(handler):
+    """Set the MQTT handler for this module."""
+    global mqtt_handler
+    mqtt_handler = handler
+
+def _update_mqtt_state():
+    """Update MQTT state if handler is available."""
+    if mqtt_handler and mqtt_handler.is_enabled:
+        status = get_serial_status()
+        mqtt_handler.update_state(serial=status.get('status', ''))
+
 def list_serial_ports():
     """Return a list of available serial ports."""
     try:
@@ -35,6 +49,7 @@ def connect_to_serial(port=None, baudrate=115200):
             ports = list_serial_ports()
             if not ports:
                 logger.error("No serial port connected")
+                _update_mqtt_state()  # Update state when connection fails
                 return False
             port = ports[0]  # Auto-select the first available port
 
@@ -69,13 +84,16 @@ def connect_to_serial(port=None, baudrate=115200):
 
         logger.info(f"Detected Table: {arduino_table_name or 'Unknown'}")
         logger.info(f"Detected Drivers: {arduino_driver_type or 'Unknown'}")
-
+        
+        _update_mqtt_state()  # Update state after successful connection
         return True  # Successfully connected
     except serial.SerialException as e:
         logger.error(f"Failed to connect to serial port {port}: {str(e)}", exc_info=True)
+        _update_mqtt_state()  # Update state when connection fails
         return False
     except Exception as e:
         logger.error(f"Unexpected error connecting to serial port: {str(e)}", exc_info=True)
+        _update_mqtt_state()  # Update state when connection fails
         return False
 
 def disconnect_serial():
@@ -87,8 +105,10 @@ def disconnect_serial():
             logger.info(f"Disconnected from serial port: {ser_port}")
         ser = None
         ser_port = None
+        _update_mqtt_state()  # Update state after disconnection
     except Exception as e:
         logger.error(f"Error disconnecting serial port: {str(e)}", exc_info=True)
+        _update_mqtt_state()  # Update state even if disconnection fails
 
 def restart_serial(port, baudrate=115200):
     """Restart the serial connection."""
@@ -97,6 +117,7 @@ def restart_serial(port, baudrate=115200):
         return connect_to_serial(port, baudrate)
     except Exception as e:
         logger.error(f"Error restarting serial connection: {str(e)}", exc_info=True)
+        _update_mqtt_state()  # Update state when restart fails
         return False
 
 def send_command(command):

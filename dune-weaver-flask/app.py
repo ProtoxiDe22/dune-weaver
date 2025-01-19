@@ -7,7 +7,7 @@ import logging
 from modules.serial.serial_manager import (
     list_serial_ports, connect_to_serial, disconnect_serial, 
     restart_serial, get_serial_status, get_device_info,
-    send_coordinate_batch, send_command
+    send_coordinate_batch, send_command, set_mqtt_handler as set_serial_mqtt_handler
 )
 from modules.firmware.firmware_manager import (
     get_firmware_info, flash_firmware, check_git_updates,
@@ -16,18 +16,27 @@ from modules.firmware.firmware_manager import (
 from modules.core.pattern_manager import (
     THETA_RHO_DIR, parse_theta_rho_file, run_theta_rho_file,
     run_theta_rho_files, get_execution_status, stop_execution,
-    pause_execution, resume_execution
+    pause_execution, resume_execution, set_mqtt_handler as set_pattern_mqtt_handler,
+    get_pattern_files
 )
 from modules.core.playlist_manager import (
     list_all_playlists, get_playlist, create_playlist,
     modify_playlist, delete_playlist, add_to_playlist
 )
+from modules.mqtt.factory import create_mqtt_handler
 
 app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
+mqtt_handler=None
 
 # Ensure the patterns directory exists
 os.makedirs(THETA_RHO_DIR, exist_ok=True)
+
+# Register cleanup on app shutdown
+@app.teardown_appcontext
+def cleanup(error):
+    if mqtt_handler:
+        mqtt_handler.stop()
 
 # API Routes
 @app.route('/')
@@ -75,7 +84,7 @@ def api_restart():
     except Exception as e:
         app.logger.error(f"Error restarting serial port: {str(e)}", exc_info=True)
         return jsonify({'error': str(e)}), 500
-
+    
 @app.route('/serial_status', methods=['GET'])
 def api_serial_status():
     return jsonify(get_serial_status())
@@ -83,12 +92,7 @@ def api_serial_status():
 # Pattern Routes
 @app.route('/list_theta_rho_files', methods=['GET'])
 def api_list_theta_rho_files():
-    files = []
-    for root, _, filenames in os.walk(THETA_RHO_DIR):
-        for file in filenames:
-            relative_path = os.path.relpath(os.path.join(root, file), THETA_RHO_DIR)
-            files.append(relative_path)
-    return jsonify(sorted(files))
+    return jsonify(get_pattern_files())
 
 @app.route('/upload_theta_rho', methods=['POST'])
 def api_upload_theta_rho():
@@ -442,6 +446,16 @@ def api_delete_theta_rho_file():
         return jsonify({"success": False, "error": str(e)}), 500
 
 if __name__ == '__main__':
+    # Initialize MQTT handler with callback registry
+    mqtt_handler = create_mqtt_handler()
+
+    # Set MQTT handler in modules that need it
+    set_serial_mqtt_handler(mqtt_handler)
+    set_pattern_mqtt_handler(mqtt_handler)
+
+    # Start MQTT handler
+    mqtt_handler.start()
+
     # Auto-connect to serial
     connect_to_serial()
     app.run(debug=False, host='0.0.0.0', port=8080)

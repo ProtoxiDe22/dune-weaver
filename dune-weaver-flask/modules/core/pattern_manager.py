@@ -6,6 +6,7 @@ from datetime import datetime
 import time
 from ..serial.serial_manager import send_coordinate_batch, reset_theta, send_command
 import logging
+from typing import List
 
 logger = logging.getLogger(__name__)
 
@@ -28,12 +29,56 @@ current_playing_index = None
 current_playlist = None
 is_clearing = False
 
+# MQTT handler (will be set by the app)
+mqtt_handler = None
+
 PLAYLISTS_FILE = os.path.join(os.getcwd(), "playlists.json")
 
 # Ensure the playlists file exists
 if not os.path.exists(PLAYLISTS_FILE):
     with open(PLAYLISTS_FILE, "w") as f:
         json.dump({}, f, indent=2)
+
+def get_pattern_files() -> List[str]:
+    """Get a list of all pattern files.
+    
+    Returns:
+        List[str]: List of pattern files relative to THETA_RHO_DIR
+    """
+    patterns = []
+    for root, _, filenames in os.walk(THETA_RHO_DIR):
+        for file in filenames:
+            if file.endswith('.thr'):
+                relative_path = os.path.relpath(os.path.join(root, file), THETA_RHO_DIR)
+                patterns.append(relative_path)
+    return sorted(patterns)
+
+def set_mqtt_handler(handler):
+    """Set the MQTT handler for this module."""
+    global mqtt_handler
+    mqtt_handler = handler
+
+def _update_mqtt_state():
+    """Update MQTT state if handler is available."""
+    if mqtt_handler and mqtt_handler.is_enabled:
+        # Get current execution status
+        status = get_execution_status()
+        
+        # Determine if we're in playlist mode and get playlist info
+        playlist_info = None
+        if status.get('current_playlist'):
+            playlist_info = {
+                'files': status['current_playlist'],
+                'current_index': status.get('current_playing_index', 0),
+                'is_clearing': status.get('is_clearing', False)
+            }
+        
+        mqtt_handler.update_state(
+            is_running=not (stop_requested or pause_requested),
+            current_file=status.get('current_playing_file', ''),
+            patterns=get_pattern_files(),
+            playlist=playlist_info
+        )
 
 def parse_theta_rho_file(file_path):
     """Parse a theta-rho file and return a list of (theta, rho) pairs."""
@@ -114,7 +159,7 @@ def run_theta_rho_file(file_path, schedule_hours=None):
     stop_requested = False
     current_playing_file = file_path
     execution_progress = (0, 0)
-
+    _update_mqtt_state()  # Update state when starting file
     coordinates = parse_theta_rho_file(file_path)
     total_coordinates = len(coordinates)
 
@@ -122,6 +167,7 @@ def run_theta_rho_file(file_path, schedule_hours=None):
         logger.error(f"Not enough coordinates for interpolation in file: {file_path}")
         current_playing_file = None
         execution_progress = None
+        _update_mqtt_state()  # Update state when file fails
         return
 
     try:
@@ -136,6 +182,7 @@ def run_theta_rho_file(file_path, schedule_hours=None):
             with pause_condition:
                 while pause_requested:
                     logger.info("Execution paused...")
+                    _update_mqtt_state()  # Update state when paused
                     pause_condition.wait()
 
             batch = coordinates[i:i + batch_size]
@@ -160,6 +207,7 @@ def run_theta_rho_file(file_path, schedule_hours=None):
     finally:
         current_playing_file = None
         execution_progress = None
+        _update_mqtt_state()  # Update state when file completes
         logger.info("Pattern execution completed.")
 
 def run_theta_rho_files(
@@ -255,16 +303,19 @@ def stop_execution():
     is_clearing = False
     current_playing_file = None
     execution_progress = None
+    
+    _update_mqtt_state()  # Update state when stopping
 
 def pause_execution():
     """Pause the current execution."""
     global pause_requested
-    with pause_condition:
-        pause_requested = True
+    pause_requested = True
+    _update_mqtt_state()  # Update state when pausing
 
 def resume_execution():
     """Resume the current execution."""
     global pause_requested
     with pause_condition:
         pause_requested = False
-        pause_condition.notify_all() 
+        pause_condition.notify_all()
+    _update_mqtt_state()  # Update state when resuming 
